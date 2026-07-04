@@ -4,6 +4,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -44,13 +45,15 @@ func (c *Client) SendMessage(ctx context.Context, chatID, text string) error {
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form))
 		if err != nil {
-			return err
+			return c.redact(err)
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			lastErr = err
+			// *url.Error stringifies the full request URL, which embeds the
+			// bot token — strip it before the error goes anywhere near logs.
+			lastErr = c.redact(err)
 			continue
 		}
 
@@ -71,4 +74,11 @@ func (c *Client) SendMessage(ctx context.Context, chatID, text string) error {
 		return nil
 	}
 	return fmt.Errorf("telegram send failed after %d attempts: %w", maxAttempts, lastErr)
+}
+
+func (c *Client) redact(err error) error {
+	if err == nil || c.botToken == "" {
+		return err
+	}
+	return errors.New(strings.ReplaceAll(err.Error(), c.botToken, "[REDACTED]"))
 }

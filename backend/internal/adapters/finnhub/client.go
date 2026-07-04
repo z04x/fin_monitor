@@ -5,9 +5,11 @@ package finnhub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -67,12 +69,15 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, target 
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
-			return err
+			return c.redact(err)
 		}
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return err
+			// *url.Error stringifies the full request URL, which embeds the
+			// token as a query param — strip it before the error goes
+			// anywhere near logs.
+			return c.redact(err)
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
@@ -89,6 +94,13 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, target 
 		return json.NewDecoder(resp.Body).Decode(target)
 	}
 	return lastErr
+}
+
+func (c *Client) redact(err error) error {
+	if err == nil || c.token == "" {
+		return err
+	}
+	return errors.New(strings.ReplaceAll(err.Error(), c.token, "[REDACTED]"))
 }
 
 func (c *Client) throttle() {

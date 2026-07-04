@@ -1,4 +1,4 @@
-# MarketAnalyzer — Технический план (v2)
+﻿# MarketAnalyzer — Технический план (v2)
 
 **Стек:** Go (модульный монолит) + Next.js (App Router, pnpm) + PostgreSQL
 **Источники данных:** Finnhub (free) + Tiingo (free) — оба по всем тикерам, без вайтлиста
@@ -435,32 +435,3 @@ Binance/Bybit коннекторы, rule-engine на Go (real-time — твоя 
 - **Google Calendar OAuth** — времена отчётов это окна BMO/AMC, не минута; хватит `.ics`.
 - **Микросервисы** — изоляция достигнута пакетами, не сетью.
 - **Intraday-цены** — дневной реакции достаточно для паттерна; intraday = платные данные и другой класс сложности.
-
----
-
-## 12. Статус решений
-
-1. ~~Тест глубины календаря~~ — **проверено, прошлое доступно**, бэкфилл в плане.
-2. ~~sqlc~~ — **принят** (adapters/postgres = sqlc-генерация).
-3. axios vs fetch — принят нативный fetch.
-4. Watchlist на старте — список в конфиге (env/файл), таблица+логин в Phase 2.
-5. **В работе: MVP-0 (Telegram-бот)** — токен получен и требует ротации (был засвечен в чате), chat_id группы "Темщики ✌🏻" получен (`-5080978918`), время дайджеста — 8:00 Варшава. Дальше: watchlist-тикеры → генерация кода (finnhub-клиент, telegram-клиент, digest, cmd/bot, GH Actions workflow).
-6. После MVP-0 — генерация стартового кода Phase 1: Makefile, docker-compose, миграции, sqlc-конфиг, httpx, адаптеры finnhub/tiingo (полные), домен reaction с табличными тестами, CI.
-
----
-
-## 13. Фактический статус кода на диске (сверено вживую)
-
-Текущий `backend/` и `frontend/` в репозитории написаны **под план v1/v2** и не соответствуют структуре из §4 (domain/adapters/pipeline, sqlc, ADR, бот). Дальнейшие шаги должны либо мигрировать этот скелет, либо (что проще при текущем объёме кода) начать структуру заново по §4 — код почти нигде не содержит логики, переписывание дешевле миграции.
-
-**Backend (`backend/`):**
-- **MVP-0 бот собран и компилируется** (`go build ./...`, `go vet ./...`, `go test ./...` — зелёные): `cmd/bot/main.go`, `internal/adapters/finnhub` (GetCalendar/GetPastEarnings/GetProfile, throttle 1 req/sec + retry на 429/5xx), `internal/adapters/telegram` (SendMessage, form-POST без SDK), `internal/domain/digest` (чистая функция Build + Filter/signalTags/sizeTag, табличные тесты). Логика без watchlist — весь рынок за день, фильтр по null-эстимейтам, группировка BMO/AMC/TBD, сортировка по revenue внутри группы, теги LOSS-EXPECTED/TURNAROUND-WATCH/BEAT/MISS/TURNAROUND. `.github/workflows/daily_digest.yml` — cron `0 6 * * *` UTC + `workflow_dispatch`. Старый плоский `internal/finnhub` удалён и заменён на `internal/adapters/finnhub` (ничего на него не ссылалось).
-- **Не сделано ещё:** ротация токена бота в BotFather, GitHub Secrets, локальный прогон с реальными ключами и ручной тест workflow — это на стороне пользователя (нужны реальные токены/доступ к репо).
-- Сайтовая часть (Phase 0/1) не трогалась: плоская структура `internal/{calendar,company,reaction}/{handler,repository,service}.go` — заглушки 3–9 строк без реализации; `internal/prices/client.go` — заготовка под Tiingo; `internal/db/db.go` — 17 строк, без pgx/sqlc; `go.mod` без внешних зависимостей (chi/pgx/sqlc/cron физически не подключены); `cmd/server/main.go` — chi-роутер без cron внутри процесса; `cmd/worker/main.go` — пустой каркас. Миграции `001_core.sql`/`002_prices_reaction.sql`/`003_users.sql` по старой схеме v1, потребуют переписывания под фикс §5.
-- `internal/pipeline/...`, `internal/adapters/postgres`, `docs/adr/`, `sqlc.yaml` — ещё не начаты (это Phase 0/1 сайта, не MVP-0).
-
-**Frontend (`frontend/`)** — Next.js скелет с App Router (`app/page.tsx`, `app/company/[ticker]/page.tsx`, `app/reaction/[ticker]/page.tsx`), компоненты `CalendarGrid`, `CompanyCard`, `CompanyHeader`, `EarningsHistory`, `ReactionChart`, `lib/api.ts` + `lib/queries.ts`. Структура по типам файлов (components/lib), а не по `features/` из §4 — потребует реорганизации при переходе на v4. Зависимости не проверены (нет `package.json` в дереве, только `node_modules` — вероятно, `package.json` есть, но не осмотрен в этом заходе).
-
-**`testdata/`** — 14 реальных JSON-фикстур Finnhub/Tiingo по MU и STZ (calendar, earnings, metric, news, profile, recommendation, prices, meta) — это единственный актив, который прямо переносится в `backend/internal/adapters/*/testdata` без изменений и обеспечивает §10 (юнит-тесты на реальных дампах).
-
-**Вывод:** объём написанного кода мал (скелет без логики), поэтому дешевле выстроить `domain/adapters/pipeline` с нуля по §4, чем мигрировать текущий `internal/{calendar,company,reaction}`. Единственное, что стоит сохранить как есть — `testdata/`.
