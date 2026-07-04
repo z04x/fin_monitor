@@ -1,0 +1,15 @@
+.env
+*.log
+
+# Go
+/backend/bin/
+/backend/tmp/
+
+# Next.js
+/frontend/.next/
+/frontend/out/
+/frontend/node_modules/
+/frontend/.env.local
+
+# Local database
+/postgres-data/
