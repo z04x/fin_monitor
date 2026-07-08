@@ -2,11 +2,7 @@ name: Daily earnings digest
 
 on:
   schedule:
-    # 06:00 UTC = 08:00 Warsaw (CET, winter). During CEST (summer) this is
-    # 08:00 UTC+2... i.e. 08:00 becomes 06:00 UTC only in winter; adjust this
-    # cron by hand around the March/October DST switch if 08:00 Warsaw matters
-    # year-round.
-    - cron: "0 6 * * *"
+    - cron: "17 6 * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -21,6 +17,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache-dependency-path: backend/go.sum
 
       - name: Run digest bot
         env:
