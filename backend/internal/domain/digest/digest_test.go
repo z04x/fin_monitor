@@ -94,3 +94,35 @@ func TestBuild_GroupsAndSortsWithinBucket(t *testing.T) {
 		t.Fatalf("expected TBD section for event with no hour, got:\n%s", text)
 	}
 }
+
+func TestChunk_UnderLimitReturnsSingleChunk(t *testing.T) {
+	got := Chunk("short text", 4096)
+	if len(got) != 1 || got[0] != "short text" {
+		t.Fatalf("expected single unmodified chunk, got %v", got)
+	}
+}
+
+func TestChunk_SplitsOnParagraphBoundaries(t *testing.T) {
+	day := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
+	events := make([]Event, 0, 100)
+	for i := 0; i < 100; i++ {
+		events = append(events, Event{Ticker: "TICK", CompanyName: "Some Long Company Name Inc", Hour: "bmo", RevenueEstimate: f(1_000_000_000)})
+	}
+	text := Build(day, events)
+
+	chunks := Chunk(text, 500)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks, got %d", len(chunks))
+	}
+	for i, c := range chunks {
+		if len(c) > 500 {
+			t.Errorf("chunk %d exceeds limit: %d chars", i, len(c))
+		}
+		if i > 0 && !strings.HasPrefix(c, "(продолжение)") {
+			t.Errorf("chunk %d missing continuation marker:\n%s", i, c)
+		}
+	}
+	if !strings.Contains(strings.Join(chunks, "\n"), "TICK") {
+		t.Fatalf("expected ticker content preserved across chunks")
+	}
+}

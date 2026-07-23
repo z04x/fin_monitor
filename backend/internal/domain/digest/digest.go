@@ -200,3 +200,48 @@ func Build(day time.Time, events []Event) string {
 
 	return header + "\n\n" + strings.Join(sections, "\n\n")
 }
+
+// TelegramMessageLimit is the Bot API's max text length per sendMessage call.
+const TelegramMessageLimit = 4096
+
+// Chunk splits text into pieces no longer than limit, breaking only on
+// paragraph boundaries ("\n\n") so an event's tag/name/EPS lines never get
+// torn apart mid-entry. A continuation marker is added to every chunk after
+// the first so recipients can tell the digest was split.
+func Chunk(text string, limit int) []string {
+	if len(text) <= limit {
+		return []string{text}
+	}
+
+	const continued = "(продолжение)\n\n"
+	paragraphs := strings.Split(text, "\n\n")
+
+	var chunks []string
+	current := ""
+	startNext := func() string {
+		if len(chunks) > 0 {
+			return continued
+		}
+		return ""
+	}
+
+	for _, p := range paragraphs {
+		candidate := p
+		if current != "" {
+			candidate = current + "\n\n" + p
+		} else {
+			candidate = startNext() + p
+		}
+		if len(candidate) > limit && current != "" {
+			chunks = append(chunks, current)
+			current = ""
+			candidate = startNext() + p
+		}
+		current = candidate
+	}
+	if current != "" {
+		chunks = append(chunks, current)
+	}
+
+	return chunks
+}

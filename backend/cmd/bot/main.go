@@ -1,6 +1,3 @@
-// Command bot runs one linear pass: fetch today's earnings calendar from
-// Finnhub, build the digest, send it to Telegram, exit. No server, no DB —
-// meant to run once a day from GitHub Actions cron.
 package main
 
 import (
@@ -70,8 +67,10 @@ func run() error {
 	text := digest.Build(today, events)
 
 	tg := telegram.NewClient(cfg.TelegramBotToken)
-	if err := tg.SendMessage(ctx, cfg.TelegramChatID, text); err != nil {
-		return err
+	for _, chunk := range digest.Chunk(text, digest.TelegramMessageLimit) {
+		if err := tg.SendMessage(ctx, cfg.TelegramChatID, chunk); err != nil {
+			return err
+		}
 	}
 
 	slog.Info("digest sent", "date", dateStr, "events_after_filter", len(digest.Filter(events)))
