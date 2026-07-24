@@ -201,7 +201,6 @@ func Build(day time.Time, events []Event) string {
 	return header + "\n\n" + strings.Join(sections, "\n\n")
 }
 
-// TelegramMessageLimit is the Bot API's max text length per sendMessage call.
 const TelegramMessageLimit = 4096
 
 // Chunk splits text into pieces no longer than limit, breaking only on

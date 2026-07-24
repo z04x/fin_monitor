@@ -4,6 +4,7 @@
 # Go
 /backend/bin/
 /backend/tmp/
+*.exe
 
 # Next.js
 /frontend/.next/
