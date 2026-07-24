@@ -109,11 +109,21 @@ func processReports(cfg config.Config, deps Deps, chatID int64, ticker string, y
 		history = nil
 	}
 
+	// Metrics are a nice-to-have: on failure we log and omit the block rather
+	// than failing the whole card.
+	var metrics *report.Metrics
+	if m, err := deps.Finnhub.GetMetrics(ctx, ticker); err != nil {
+		slog.Warn("reports: metrics failed", "ticker", ticker, "error", err)
+	} else {
+		metrics = mapmetrics(m)
+	}
+
 	card := report.Card{
 		Ticker:    ticker,
 		Name:      profile.Name,
 		Industry:  profile.Industry,
 		MarketCap: profile.MarketCapitalization,
+		Metrics:   metrics,
 		Past:      maphistory(history, years*4),
 	}
 	sendText(cfg, deps, chatID, report.Build(card))
@@ -136,6 +146,19 @@ func maphistory(history []finnhub.EarningHistory, limit int) []report.Quarter {
 		})
 	}
 	return out
+}
+
+func mapmetrics(m finnhub.Metrics) *report.Metrics {
+	return &report.Metrics{
+		PE:               m.PE,
+		ROE:              m.ROE,
+		GrossMargin:      m.GrossMargin,
+		OperatingMargin:  m.OperatingMargin,
+		NetMargin:        m.NetMargin,
+		RevenueGrowthYoY: m.RevenueGrowthYoY,
+		Week52High:       m.Week52High,
+		Week52Low:        m.Week52Low,
+	}
 }
 
 func sendText(cfg config.Config, deps Deps, chatID int64, text string) {

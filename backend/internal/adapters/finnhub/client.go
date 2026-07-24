@@ -58,6 +58,17 @@ func (c *Client) GetEarnings(ctx context.Context, symbol string) ([]EarningHisto
 	return history, nil
 }
 
+// GetMetrics returns TTM/valuation metrics (stock/metric?metric=all). Free
+// tier. Any field may be nil if Finnhub has no value for this symbol.
+func (c *Client) GetMetrics(ctx context.Context, symbol string) (Metrics, error) {
+	var resp MetricsResponse
+	query := url.Values{"symbol": {symbol}, "metric": {"all"}}
+	if err := c.get(ctx, "/stock/metric", query, &resp); err != nil {
+		return Metrics{}, fmt.Errorf("get metrics %s: %w", symbol, err)
+	}
+	return resp.Metric, nil
+}
+
 func (c *Client) GetProfile(ctx context.Context, symbol string) (Profile, error) {
 	var profile Profile
 	query := url.Values{"symbol": {symbol}}

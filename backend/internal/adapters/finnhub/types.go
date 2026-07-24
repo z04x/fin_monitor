@@ -30,6 +30,23 @@ type EarningHistory struct {
 	SurprisePercent *float64 `json:"surprisePercent"`
 }
 
+// MetricsResponse wraps stock/metric?metric=all. We only decode the handful
+// of TTM/valuation fields the /reports card shows.
+type MetricsResponse struct {
+	Metric Metrics `json:"metric"`
+}
+
+type Metrics struct {
+	PE               *float64 `json:"peTTM"`
+	ROE              *float64 `json:"roeTTM"`
+	GrossMargin      *float64 `json:"grossMarginTTM"`
+	OperatingMargin  *float64 `json:"operatingMarginTTM"`
+	NetMargin        *float64 `json:"netProfitMarginTTM"`
+	RevenueGrowthYoY *float64 `json:"revenueGrowthTTMYoy"`
+	Week52High       *float64 `json:"52WeekHigh"`
+	Week52Low        *float64 `json:"52WeekLow"`
+}
+
 type Profile struct {
 	Ticker               string   `json:"ticker"`
 	Name                 string   `json:"name"`

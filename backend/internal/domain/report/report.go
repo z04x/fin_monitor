@@ -22,12 +22,26 @@ type Quarter struct {
 	SurprisePercent *float64
 }
 
+// Metrics is the optional valuation/quality block (Finnhub stock/metric TTM
+// fields). Any field may be nil; the block is omitted entirely if empty.
+type Metrics struct {
+	PE               *float64
+	ROE              *float64 // percent
+	GrossMargin      *float64 // percent
+	OperatingMargin  *float64 // percent
+	NetMargin        *float64 // percent
+	RevenueGrowthYoY *float64 // percent
+	Week52High       *float64
+	Week52Low        *float64
+}
+
 // Card is the fully-resolved input to Build.
 type Card struct {
 	Ticker    string
 	Name      string
 	Industry  string
 	MarketCap *float64 // in millions (Finnhub marketCapitalization unit)
+	Metrics   *Metrics // nil to omit the metrics block
 	Past      []Quarter
 }
 
@@ -69,6 +83,61 @@ func formatMarketCap(millions *float64) string {
 	return digest.FormatMoney(&v)
 }
 
+func ratio(v *float64) string {
+	if v == nil {
+		return "н/д"
+	}
+	return fmt.Sprintf("%.1f", *v)
+}
+
+func percent(v *float64) string {
+	if v == nil {
+		return "н/д"
+	}
+	return fmt.Sprintf("%.1f%%", *v)
+}
+
+func signedPercent(v *float64) string {
+	if v == nil {
+		return "н/д"
+	}
+	return fmt.Sprintf("%+.1f%%", *v)
+}
+
+func price(v *float64) string {
+	if v == nil {
+		return "н/д"
+	}
+	return fmt.Sprintf("$%.2f", *v)
+}
+
+// formatMetrics renders the metrics block, or "" if there's nothing to show.
+func formatMetrics(m *Metrics) string {
+	if m == nil {
+		return ""
+	}
+	var lines []string
+
+	if m.PE != nil || m.ROE != nil {
+		lines = append(lines, fmt.Sprintf("P/E: %s · ROE: %s", ratio(m.PE), percent(m.ROE)))
+	}
+	if m.GrossMargin != nil || m.OperatingMargin != nil || m.NetMargin != nil {
+		lines = append(lines, fmt.Sprintf("Маржа: вал. %s / опер. %s / чист. %s",
+			percent(m.GrossMargin), percent(m.OperatingMargin), percent(m.NetMargin)))
+	}
+	if m.RevenueGrowthYoY != nil {
+		lines = append(lines, "Рост выручки г/г: "+signedPercent(m.RevenueGrowthYoY))
+	}
+	if m.Week52Low != nil || m.Week52High != nil {
+		lines = append(lines, fmt.Sprintf("52-нед. диапазон: %s – %s", price(m.Week52Low), price(m.Week52High)))
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return "📈 Метрики (TTM):\n" + strings.Join(lines, "\n")
+}
+
 func formatQuarter(q Quarter) string {
 	label := fmt.Sprintf("Q%d %d", q.Quarter, q.Year)
 	if tag := beatTag(q); tag != "" {
@@ -98,6 +167,10 @@ func Build(c Card) string {
 	}
 	if len(meta) > 0 {
 		header += "\n" + strings.Join(meta, " · ")
+	}
+
+	if block := formatMetrics(c.Metrics); block != "" {
+		header += "\n\n" + block
 	}
 
 	if len(c.Past) == 0 {

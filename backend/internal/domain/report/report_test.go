@@ -63,6 +63,43 @@ func TestBuildFull(t *testing.T) {
 	}
 }
 
+func TestBuildWithMetrics(t *testing.T) {
+	c := Card{
+		Ticker: "MU",
+		Name:   "Micron",
+		Metrics: &Metrics{
+			PE:               f(21.0),
+			ROE:              f(70.6),
+			GrossMargin:      f(72.6),
+			OperatingMargin:  f(65.6),
+			NetMargin:        f(55.9),
+			RevenueGrowthYoY: f(167.0),
+			Week52High:       f(1255),
+			Week52Low:        f(103.38),
+		},
+		Past: []Quarter{{Year: 2026, Quarter: 3, EPSActual: f(25.11), EPSEstimate: f(21.4), SurprisePercent: f(17.3)}},
+	}
+	got := Build(c)
+	for _, want := range []string{
+		"📈 Метрики (TTM):",
+		"P/E: 21.0 · ROE: 70.6%",
+		"Маржа: вал. 72.6% / опер. 65.6% / чист. 55.9%",
+		"Рост выручки г/г: +167.0%",
+		"52-нед. диапазон: $103.38 – $1255.00",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("output missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
+func TestBuildOmitsEmptyMetrics(t *testing.T) {
+	got := Build(Card{Ticker: "X", Name: "X", Metrics: &Metrics{}, Past: []Quarter{{Year: 2025, Quarter: 1, EPSActual: f(1), EPSEstimate: f(1), SurprisePercent: f(0)}}})
+	if strings.Contains(got, "Метрики") {
+		t.Fatalf("empty metrics should be omitted, got:\n%s", got)
+	}
+}
+
 func TestBuildFallsBackToTickerWhenNoName(t *testing.T) {
 	got := Build(Card{Ticker: "XYZ", Past: []Quarter{{Year: 2025, Quarter: 1, EPSActual: f(1), EPSEstimate: f(1), SurprisePercent: f(0)}}})
 	if !strings.Contains(got, "XYZ — XYZ") {
