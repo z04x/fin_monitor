@@ -16,6 +16,20 @@ type CalendarEvent struct {
 	RevenueActual   *float64 `json:"revenueActual"`
 }
 
+// EarningHistory is one row of stock/earnings — the beat/miss history.
+// NOTE: Period is the fiscal quarter END, not the publication date. Do not
+// use it as the report date (see spec §6 Step 0).
+type EarningHistory struct {
+	Symbol          string   `json:"symbol"`
+	Period          string   `json:"period"`
+	Year            int      `json:"year"`
+	Quarter         int      `json:"quarter"`
+	EPSEstimate     *float64 `json:"estimate"`
+	EPSActual       *float64 `json:"actual"`
+	Surprise        *float64 `json:"surprise"`
+	SurprisePercent *float64 `json:"surprisePercent"`
+}
+
 type Profile struct {
 	Ticker               string   `json:"ticker"`
 	Name                 string   `json:"name"`

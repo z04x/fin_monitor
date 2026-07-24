@@ -46,6 +46,18 @@ func (c *Client) GetCalendar(ctx context.Context, from, to string) ([]CalendarEv
 	return resp.EarningsCalendar, nil
 }
 
+// GetEarnings returns the beat/miss history for a symbol (stock/earnings),
+// newest quarter first. Available on the free tier (unlike historical
+// calendar/earnings ranges, which the free tier limits to the current week).
+func (c *Client) GetEarnings(ctx context.Context, symbol string) ([]EarningHistory, error) {
+	var history []EarningHistory
+	query := url.Values{"symbol": {symbol}}
+	if err := c.get(ctx, "/stock/earnings", query, &history); err != nil {
+		return nil, fmt.Errorf("get earnings %s: %w", symbol, err)
+	}
+	return history, nil
+}
+
 func (c *Client) GetProfile(ctx context.Context, symbol string) (Profile, error) {
 	var profile Profile
 	query := url.Values{"symbol": {symbol}}

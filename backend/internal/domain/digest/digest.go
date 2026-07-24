@@ -80,7 +80,8 @@ func signalTags(e Event) []string {
 	return tags
 }
 
-func formatMoney(v *float64) string {
+// FormatMoney renders a dollar amount with B/M suffixes, or "н/д" for nil.
+func FormatMoney(v *float64) string {
 	if v == nil {
 		return "н/д"
 	}
@@ -94,7 +95,8 @@ func formatMoney(v *float64) string {
 	}
 }
 
-func formatEPS(v *float64) string {
+// FormatEPS renders an EPS value to 2 decimals, or "н/д" for nil.
+func FormatEPS(v *float64) string {
 	if v == nil {
 		return "н/д"
 	}
@@ -145,7 +147,7 @@ func formatEvent(e Event) string {
 
 	return fmt.Sprintf(
 		"%s\n%s — %s\nEPS ожидание: %s | Revenue ожидание: %s",
-		tagLine, e.Ticker, name, formatEPS(e.EPSEstimate), formatMoney(e.RevenueEstimate),
+		tagLine, e.Ticker, name, FormatEPS(e.EPSEstimate), FormatMoney(e.RevenueEstimate),
 	)
 }
 

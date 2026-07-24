@@ -19,8 +19,9 @@ type Config struct {
 	CompanyCacheTTLHours int
 	NewsCacheTTLHours    int
 	PriceRefreshHourUTC  int
-	TelegramBotToken     string
-	TelegramChatID       string
+	TelegramBotToken      string
+	TelegramChatID        string
+	TelegramWebhookSecret string
 }
 
 // Load reads process env vars, falling back to values from a .env file in
@@ -40,8 +41,9 @@ func Load() Config {
 		CompanyCacheTTLHours: getEnvInt("COMPANY_CACHE_TTL_HOURS", 24),
 		NewsCacheTTLHours:    getEnvInt("NEWS_CACHE_TTL_HOURS", 6),
 		PriceRefreshHourUTC:  getEnvInt("PRICE_REFRESH_HOUR_UTC", 23),
-		TelegramBotToken:     getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TelegramChatID:       getEnv("TELEGRAM_CHAT_ID", ""),
+		TelegramBotToken:      getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramChatID:        getEnv("TELEGRAM_CHAT_ID", ""),
+		TelegramWebhookSecret: getEnv("TELEGRAM_WEBHOOK_SECRET", ""),
 	}
 }
 

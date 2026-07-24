@@ -17,6 +17,42 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// Update is the slice of a Telegram webhook payload we care about: the chat
+// id (to scope who we answer) and the message text (to parse a command).
+type Update struct {
+	Message *struct {
+		Chat struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
+		Text string `json:"text"`
+	} `json:"message"`
+}
+
+// ParseCommand extracts (chatID, command, args) from a raw webhook body.
+// command is lower-cased without the leading slash and without any
+// "@botname" suffix (Telegram appends it in groups); args is the rest of the
+// text, trimmed. ok is false if the body isn't a parseable /command message.
+func ParseCommand(body []byte) (chatID int64, command, args string, ok bool) {
+	var u Update
+	if err := json.Unmarshal(body, &u); err != nil || u.Message == nil {
+		return 0, "", "", false
+	}
+	text := strings.TrimSpace(u.Message.Text)
+	if !strings.HasPrefix(text, "/") {
+		return 0, "", "", false
+	}
+
+	head, rest, _ := strings.Cut(text, " ")
+	command = strings.ToLower(strings.TrimPrefix(head, "/"))
+	if at := strings.IndexByte(command, '@'); at >= 0 {
+		command = command[:at]
+	}
+	if command == "" {
+		return 0, "", "", false
+	}
+	return u.Message.Chat.ID, command, strings.TrimSpace(rest), true
+}
+
 func NewClient(botToken string) *Client {
 	return &Client{
 		botToken:   botToken,

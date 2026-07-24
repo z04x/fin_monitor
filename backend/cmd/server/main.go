@@ -6,13 +6,19 @@ import (
 	"os"
 	"time"
 
+	"market-analyzer/backend/internal/adapters/finnhub"
+	"market-analyzer/backend/internal/adapters/telegram"
 	"market-analyzer/backend/internal/config"
 	"market-analyzer/backend/internal/httpapi"
 )
 
 func main() {
 	cfg := config.Load()
-	router := httpapi.NewRouter(cfg)
+	deps := httpapi.Deps{
+		Finnhub:  finnhub.NewClient(cfg.FinnhubBaseURL, cfg.FinnhubToken),
+		Telegram: telegram.NewClient(cfg.TelegramBotToken),
+	}
+	router := httpapi.NewRouter(cfg, deps)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
