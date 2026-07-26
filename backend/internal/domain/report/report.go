@@ -1,29 +1,21 @@
-// Package report builds the text of a /reports TICKER Telegram card:
-// company header + beat/miss history. Pure domain logic — no HTTP, no
-// provider JSON. Price reaction is intentionally out of scope for now: the
-// free Finnhub tier no longer serves historical report dates (see spec §6
-// and the /reports design notes), which the reaction calc requires.
+// Package report builds the text of a /reports TICKER Telegram card: company
+// header, TTM metrics, analyst sentiment, and — the core — how the stock has
+// historically reacted to earnings (aggregate stats + recent events). Pure
+// domain logic: plain values and other domain types in, text out. No HTTP, no
+// provider JSON. Daily granularity (intraday isn't free).
 package report
 
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"market-analyzer/backend/internal/domain/digest"
+	"market-analyzer/backend/internal/domain/reaction"
+	"market-analyzer/backend/internal/domain/sentiment"
 )
 
-// Quarter is one past earnings row (Finnhub stock/earnings). Period is the
-// fiscal quarter END, not the publication date — shown only as a Q/Y label.
-type Quarter struct {
-	Year            int
-	Quarter         int
-	EPSEstimate     *float64
-	EPSActual       *float64
-	SurprisePercent *float64
-}
-
-// Metrics is the optional valuation/quality block (Finnhub stock/metric TTM
-// fields). Any field may be nil; the block is omitted entirely if empty.
+// Metrics is the optional valuation/quality block (Finnhub stock/metric TTM).
 type Metrics struct {
 	PE               *float64
 	ROE              *float64 // percent
@@ -35,46 +27,35 @@ type Metrics struct {
 	Week52Low        *float64
 }
 
-// Card is the fully-resolved input to Build.
+// Event is one earnings event shown in detail: its date/session, the EPS
+// surprise (when matched to a Finnhub quarter), and the computed price
+// reaction (nil if it couldn't be computed off available history).
+type Event struct {
+	Date            time.Time
+	Session         string // "bmo" | "amc" | ""
+	Year, Quarter   int    // 0 if not matched to a Finnhub quarter
+	EPSEstimate     *float64
+	EPSActual       *float64
+	SurprisePercent *float64
+	Reaction        *reaction.Event
+}
+
+// Card is the fully-resolved input to Build. Any pointer/slice field left
+// empty is simply omitted from the output.
 type Card struct {
 	Ticker    string
 	Name      string
 	Industry  string
-	MarketCap *float64 // in millions (Finnhub marketCapitalization unit)
-	Metrics   *Metrics // nil to omit the metrics block
-	Past      []Quarter
+	MarketCap *float64 // Finnhub marketCapitalization unit (millions)
+	Metrics   *Metrics
+	Sentiment *sentiment.Summary
+	Stats     *reaction.Stats // aggregate reaction over full history
+	StatsFrom int             // earliest year covered by Stats (0 to omit)
+	Events    []Event         // recent events, newest-first
 }
 
-// beatTag returns the beat/miss label for a quarter, or "" if it can't be
-// determined (no actual yet, or no surprise figure).
-func beatTag(q Quarter) string {
-	if q.EPSActual == nil {
-		return ""
-	}
-	if q.SurprisePercent != nil {
-		switch {
-		case *q.SurprisePercent > 0:
-			return fmt.Sprintf("BEAT +%.1f%%", *q.SurprisePercent)
-		case *q.SurprisePercent < 0:
-			return fmt.Sprintf("MISS %.1f%%", *q.SurprisePercent)
-		default:
-			return "В ЛИНИЮ"
-		}
-	}
-	if q.EPSEstimate != nil {
-		switch {
-		case *q.EPSActual > *q.EPSEstimate:
-			return "BEAT"
-		case *q.EPSActual < *q.EPSEstimate:
-			return "MISS"
-		default:
-			return "В ЛИНИЮ"
-		}
-	}
-	return ""
-}
+// --- number formatting -------------------------------------------------------
 
-// formatMarketCap renders Finnhub's marketCapitalization (in $millions).
 func formatMarketCap(millions *float64) string {
 	if millions == nil {
 		return ""
@@ -111,13 +92,33 @@ func price(v *float64) string {
 	return fmt.Sprintf("$%.2f", *v)
 }
 
-// formatMetrics renders the metrics block, or "" if there's nothing to show.
+// --- sections ----------------------------------------------------------------
+
+func header(c Card) string {
+	name := c.Name
+	if name == "" {
+		name = c.Ticker
+	}
+	h := fmt.Sprintf("📊 %s — %s", c.Ticker, name)
+
+	var meta []string
+	if c.Industry != "" {
+		meta = append(meta, c.Industry)
+	}
+	if cap := formatMarketCap(c.MarketCap); cap != "" {
+		meta = append(meta, "капитализация "+cap)
+	}
+	if len(meta) > 0 {
+		h += "\n" + strings.Join(meta, " · ")
+	}
+	return h
+}
+
 func formatMetrics(m *Metrics) string {
 	if m == nil {
 		return ""
 	}
 	var lines []string
-
 	if m.PE != nil || m.ROE != nil {
 		lines = append(lines, fmt.Sprintf("P/E: %s · ROE: %s", ratio(m.PE), percent(m.ROE)))
 	}
@@ -131,57 +132,177 @@ func formatMetrics(m *Metrics) string {
 	if m.Week52Low != nil || m.Week52High != nil {
 		lines = append(lines, fmt.Sprintf("52-нед. диапазон: %s – %s", price(m.Week52Low), price(m.Week52High)))
 	}
-
 	if len(lines) == 0 {
 		return ""
 	}
 	return "📈 Метрики (TTM):\n" + strings.Join(lines, "\n")
 }
 
-func formatQuarter(q Quarter) string {
-	label := fmt.Sprintf("Q%d %d", q.Quarter, q.Year)
-	if tag := beatTag(q); tag != "" {
-		label += " [" + tag + "]"
+func formatSentiment(s *sentiment.Summary) string {
+	if s == nil {
+		return ""
 	}
-	return fmt.Sprintf(
-		"%s\nEPS: %s (ожидание %s)",
-		label, digest.FormatEPS(q.EPSActual), digest.FormatEPS(q.EPSEstimate),
-	)
+	line := fmt.Sprintf("👥 Аналитики: %s (score %+.2f, %d аналитиков)", s.Label, s.Score, s.Total)
+
+	var trend []string
+	switch {
+	case s.ScoreTrend > 0.15:
+		trend = append(trend, "консенсус улучшается")
+	case s.ScoreTrend < -0.15:
+		trend = append(trend, "консенсус ухудшается")
+	default:
+		trend = append(trend, "консенсус стабилен")
+	}
+	if s.CoverageDelta > 0 {
+		trend = append(trend, fmt.Sprintf("покрытие +%d", s.CoverageDelta))
+	} else if s.CoverageDelta < 0 {
+		trend = append(trend, fmt.Sprintf("покрытие %d", s.CoverageDelta))
+	}
+	return line + "\n" + "За 4 мес: " + strings.Join(trend, ", ")
 }
 
-// Build renders the card text. Past is expected already trimmed to the
-// requested depth and ordered newest-first by the caller.
+func formatStats(s *reaction.Stats, from int) string {
+	if s == nil || s.N == 0 {
+		return ""
+	}
+	title := fmt.Sprintf("📉 Реакция на отчёты (%d отчётов", s.N)
+	if from > 0 {
+		title += fmt.Sprintf(" с %d", from)
+	}
+	title += "):"
+
+	lines := []string{
+		fmt.Sprintf("Ожидаемый ход: ±%.1f%% vs рынка (от %+.1f%% до %+.1f%%)", s.ExpMove, s.MinReaction, s.MaxReaction),
+		fmt.Sprintf("Растёт: %.0f%% случаев", s.WinRate*100),
+	}
+	if s.HasPreDrift {
+		lines = append(lines, fmt.Sprintf("Разгон до отчёта: %+.1f%% за 3 дня", s.AvgPreDrift))
+	}
+	if s.HasPostDrift {
+		word := "продолжает"
+		if s.AvgContinue < 0 {
+			word = "откатывает"
+		}
+		lines = append(lines, fmt.Sprintf("После отчёта: %s %+.1f%% (3 дня)", word, s.AvgContinue))
+	}
+	if s.HasGap {
+		lines = append(lines, fmt.Sprintf("Гэп: вверх %.0f%%, удерживает %.0f%%", s.GapUpRate*100, s.GapGoRate*100))
+	}
+	if s.HasVolume {
+		lines = append(lines, fmt.Sprintf("Объём в день реакции: ×%.1f от обычного", s.AvgVolumeX))
+	}
+	return title + "\n" + strings.Join(lines, "\n")
+}
+
+func gapWords(g *reaction.Gap) string {
+	if g == nil {
+		return ""
+	}
+	dir := "вверх"
+	if g.Direction == "down" {
+		dir = "вниз"
+	}
+	var pat string
+	switch g.Pattern {
+	case "go":
+		pat = "удерживает"
+	case "partial-fade":
+		pat = "частичный фейд"
+	case "full-fade":
+		pat = "полный фейд"
+	}
+	if pat == "" {
+		return "гэп " + dir
+	}
+	return "гэп " + dir + ", " + pat
+}
+
+func surpriseTag(e Event) string {
+	if e.SurprisePercent == nil || e.EPSActual == nil {
+		return ""
+	}
+	switch {
+	case *e.SurprisePercent > 0:
+		return fmt.Sprintf("beat +%.1f%%", *e.SurprisePercent)
+	case *e.SurprisePercent < 0:
+		return fmt.Sprintf("miss %.1f%%", *e.SurprisePercent)
+	default:
+		return "в линию"
+	}
+}
+
+var ruMonthShort = map[time.Month]string{
+	time.January: "янв", time.February: "фев", time.March: "мар", time.April: "апр",
+	time.May: "мая", time.June: "июн", time.July: "июл", time.August: "авг",
+	time.September: "сен", time.October: "окт", time.November: "ноя", time.December: "дек",
+}
+
+func sessionTag(s string) string {
+	switch s {
+	case "amc":
+		return "AMC"
+	case "bmo":
+		return "BMO"
+	default:
+		return ""
+	}
+}
+
+func formatEvent(e Event) string {
+	date := fmt.Sprintf("%d %s %d", e.Date.Day(), ruMonthShort[e.Date.Month()], e.Date.Year())
+	head := date
+	if st := sessionTag(e.Session); st != "" {
+		head += " (" + st + ")"
+	}
+	if tag := surpriseTag(e); tag != "" {
+		head += " · " + tag
+	}
+
+	if e.Reaction == nil {
+		return head
+	}
+	r := e.Reaction
+
+	parts := []string{fmt.Sprintf("реакция %+.1f%% vs рынка", r.ReactionVsSpy)}
+	if r.Sigma != 0 {
+		parts = append(parts, fmt.Sprintf("%+.1fσ", r.Sigma))
+	}
+	detail := strings.Join(parts, " ")
+	if gw := gapWords(r.Gap); gw != "" {
+		detail += " · " + gw
+	}
+	if r.VolumeX > 0 {
+		detail += fmt.Sprintf(" · ×%.1f объём", r.VolumeX)
+	}
+
+	// Sell-the-news: beat but the market sold it (reaction vs SPY negative).
+	if e.SurprisePercent != nil && *e.SurprisePercent > 0 && r.ReactionVsSpy < 0 {
+		detail += "  ⚠️ sell-the-news"
+	}
+
+	return head + "\n  " + detail
+}
+
+// Build renders the full card. Sections with no data are omitted.
 func Build(c Card) string {
-	name := c.Name
-	if name == "" {
-		name = c.Ticker
-	}
-	header := fmt.Sprintf("📊 %s — %s", c.Ticker, name)
+	sections := []string{header(c)}
 
-	var meta []string
-	if c.Industry != "" {
-		meta = append(meta, c.Industry)
+	if m := formatMetrics(c.Metrics); m != "" {
+		sections = append(sections, m)
 	}
-	if cap := formatMarketCap(c.MarketCap); cap != "" {
-		meta = append(meta, "капитализация "+cap)
+	if s := formatSentiment(c.Sentiment); s != "" {
+		sections = append(sections, s)
 	}
-	if len(meta) > 0 {
-		header += "\n" + strings.Join(meta, " · ")
+	if s := formatStats(c.Stats, c.StatsFrom); s != "" {
+		sections = append(sections, s)
 	}
-
-	if block := formatMetrics(c.Metrics); block != "" {
-		header += "\n\n" + block
+	if len(c.Events) > 0 {
+		lines := make([]string, 0, len(c.Events))
+		for _, e := range c.Events {
+			lines = append(lines, formatEvent(e))
+		}
+		sections = append(sections, "🗓 Последние отчёты:\n"+strings.Join(lines, "\n"))
 	}
 
-	if len(c.Past) == 0 {
-		return header + "\n\nИстории отчётов по этому тикеру нет."
-	}
-
-	lines := make([]string, 0, len(c.Past))
-	for _, q := range c.Past {
-		lines = append(lines, formatQuarter(q))
-	}
-
-	return header + fmt.Sprintf("\n\nКак отчитывался (посл. %d кв.):\n\n", len(c.Past)) +
-		strings.Join(lines, "\n\n")
+	return strings.Join(sections, "\n\n")
 }

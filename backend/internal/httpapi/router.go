@@ -1,21 +1,38 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
+	"market-analyzer/backend/internal/adapters/edgar"
 	"market-analyzer/backend/internal/adapters/finnhub"
 	"market-analyzer/backend/internal/adapters/telegram"
 	"market-analyzer/backend/internal/config"
+	"market-analyzer/backend/internal/prices"
 )
+
+// PriceProvider / AnnouncementProvider are satisfied both by the live adapter
+// clients and by the DB-backed cache (internal/store), so the handler is
+// unaware of whether a cache is present.
+type PriceProvider interface {
+	GetDailyPrices(ctx context.Context, ticker, from, to string) ([]prices.DailyPrice, error)
+}
+
+type AnnouncementProvider interface {
+	GetAnnouncements(ctx context.Context, ticker string) ([]edgar.Announcement, error)
+}
 
 // Deps holds the long-lived clients shared across requests. They MUST be
 // created once at startup and reused: finnhub.Client carries a mutex-guarded
-// rate limiter, so a fresh client per request would defeat throttling.
+// rate limiter and edgar.Client caches the CIK map, so a fresh client per
+// request would defeat both.
 type Deps struct {
 	Finnhub  *finnhub.Client
 	Telegram *telegram.Client
+	Prices   PriceProvider
+	Edgar    AnnouncementProvider
 }
 
 func NewRouter(cfg config.Config, deps Deps) http.Handler {

@@ -30,6 +30,16 @@ type EarningHistory struct {
 	SurprisePercent *float64 `json:"surprisePercent"`
 }
 
+// Recommendation is one monthly analyst-consensus snapshot (stock/recommendation).
+type Recommendation struct {
+	Period     string `json:"period"`
+	StrongBuy  int    `json:"strongBuy"`
+	Buy        int    `json:"buy"`
+	Hold       int    `json:"hold"`
+	Sell       int    `json:"sell"`
+	StrongSell int    `json:"strongSell"`
+}
+
 // MetricsResponse wraps stock/metric?metric=all. We only decode the handful
 // of TTM/valuation fields the /reports card shows.
 type MetricsResponse struct {

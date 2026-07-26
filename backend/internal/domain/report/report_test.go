@@ -3,106 +3,130 @@ package report
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"market-analyzer/backend/internal/domain/reaction"
+	"market-analyzer/backend/internal/domain/sentiment"
 )
 
 func f(v float64) *float64 { return &v }
 
-func TestBeatTag(t *testing.T) {
-	cases := []struct {
-		name string
-		q    Quarter
-		want string
-	}{
-		{"no actual yet", Quarter{EPSEstimate: f(1.0)}, ""},
-		{"beat by surprise", Quarter{EPSActual: f(1.5), SurprisePercent: f(12.3)}, "BEAT +12.3%"},
-		{"miss by surprise", Quarter{EPSActual: f(0.5), SurprisePercent: f(-8.0)}, "MISS -8.0%"},
-		{"inline by surprise", Quarter{EPSActual: f(1.0), SurprisePercent: f(0)}, "В ЛИНИЮ"},
-		{"beat without surprise", Quarter{EPSEstimate: f(1.0), EPSActual: f(1.2)}, "BEAT"},
-		{"miss without surprise", Quarter{EPSEstimate: f(1.0), EPSActual: f(0.8)}, "MISS"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := beatTag(tc.q); got != tc.want {
-				t.Fatalf("beatTag = %q, want %q", got, tc.want)
-			}
-		})
-	}
+func dt(s string) time.Time {
+	t, _ := time.Parse("2006-01-02", s)
+	return t
 }
 
-func TestBuildEmptyHistory(t *testing.T) {
-	got := Build(Card{Ticker: "AAA", Name: "Alpha", Past: nil})
-	if !strings.Contains(got, "Истории отчётов") {
-		t.Fatalf("expected empty-history notice, got:\n%s", got)
-	}
-}
-
-func TestBuildFull(t *testing.T) {
+func TestBuildHeaderAndMetrics(t *testing.T) {
 	c := Card{
 		Ticker:    "MU",
 		Name:      "Micron Technology",
-		Industry:  "Technology",
-		MarketCap: f(120_000), // $120B, given in millions
-		Past: []Quarter{
-			{Year: 2026, Quarter: 3, EPSEstimate: f(21.40), EPSActual: f(25.11), SurprisePercent: f(17.3)},
-			{Year: 2026, Quarter: 2, EPSEstimate: f(9.58), EPSActual: f(12.20), SurprisePercent: f(27.3)},
+		Industry:  "Semiconductors",
+		MarketCap: f(120_000), // $120B in millions
+		Metrics: &Metrics{
+			PE: f(21.0), ROE: f(70.6), GrossMargin: f(72.6), OperatingMargin: f(65.6),
+			NetMargin: f(55.9), RevenueGrowthYoY: f(167.0), Week52High: f(1255), Week52Low: f(103.38),
 		},
 	}
 	got := Build(c)
-
 	for _, want := range []string{
-		"MU — Micron Technology",
-		"Technology",
-		"$120.0B",
-		"Q3 2026 [BEAT +17.3%]",
-		"EPS: 25.11 (ожидание 21.40)",
-		"Q2 2026 [BEAT +27.3%]",
+		"MU — Micron Technology", "Semiconductors", "$120.0B",
+		"P/E: 21.0 · ROE: 70.6%", "52-нед. диапазон: $103.38 – $1255.00",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("output missing %q, got:\n%s", want, got)
+			t.Fatalf("missing %q in:\n%s", want, got)
 		}
 	}
 }
 
-func TestBuildWithMetrics(t *testing.T) {
+func TestBuildSentiment(t *testing.T) {
+	c := Card{
+		Ticker:    "MU",
+		Sentiment: &sentiment.Summary{Label: "Покупать", Score: 1.21, Total: 56, ScoreTrend: 0.02, CoverageDelta: 4},
+	}
+	got := Build(c)
+	if !strings.Contains(got, "👥 Аналитики: Покупать (score +1.21, 56 аналитиков)") {
+		t.Fatalf("sentiment line missing:\n%s", got)
+	}
+	if !strings.Contains(got, "консенсус стабилен") || !strings.Contains(got, "покрытие +4") {
+		t.Fatalf("trend line wrong:\n%s", got)
+	}
+}
+
+func TestBuildStats(t *testing.T) {
 	c := Card{
 		Ticker: "MU",
-		Name:   "Micron",
-		Metrics: &Metrics{
-			PE:               f(21.0),
-			ROE:              f(70.6),
-			GrossMargin:      f(72.6),
-			OperatingMargin:  f(65.6),
-			NetMargin:        f(55.9),
-			RevenueGrowthYoY: f(167.0),
-			Week52High:       f(1255),
-			Week52Low:        f(103.38),
+		Stats: &reaction.Stats{
+			N: 37, ExpMove: 8.5, StdMove: 6, MinReaction: -22, MaxReaction: 18, WinRate: 0.6,
+			AvgPreDrift: 2.1, HasPreDrift: true, AvgContinue: 1.4, HasPostDrift: true,
+			AvgVolumeX: 2.8, HasVolume: true, GapUpRate: 0.65, GapGoRate: 0.58, HasGap: true,
 		},
-		Past: []Quarter{{Year: 2026, Quarter: 3, EPSActual: f(25.11), EPSEstimate: f(21.4), SurprisePercent: f(17.3)}},
+		StatsFrom: 2017,
 	}
 	got := Build(c)
 	for _, want := range []string{
-		"📈 Метрики (TTM):",
-		"P/E: 21.0 · ROE: 70.6%",
-		"Маржа: вал. 72.6% / опер. 65.6% / чист. 55.9%",
-		"Рост выручки г/г: +167.0%",
-		"52-нед. диапазон: $103.38 – $1255.00",
+		"📉 Реакция на отчёты (37 отчётов с 2017):",
+		"Ожидаемый ход: ±8.5% vs рынка (от -22.0% до +18.0%)",
+		"Растёт: 60% случаев",
+		"Разгон до отчёта: +2.1% за 3 дня",
+		"После отчёта: продолжает +1.4% (3 дня)",
+		"Гэп: вверх 65%, удерживает 58%",
+		"Объём в день реакции: ×2.8 от обычного",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("output missing %q, got:\n%s", want, got)
+			t.Fatalf("missing %q in:\n%s", want, got)
 		}
 	}
 }
 
-func TestBuildOmitsEmptyMetrics(t *testing.T) {
-	got := Build(Card{Ticker: "X", Name: "X", Metrics: &Metrics{}, Past: []Quarter{{Year: 2025, Quarter: 1, EPSActual: f(1), EPSEstimate: f(1), SurprisePercent: f(0)}}})
-	if strings.Contains(got, "Метрики") {
-		t.Fatalf("empty metrics should be omitted, got:\n%s", got)
+func TestBuildEventSellTheNews(t *testing.T) {
+	c := Card{
+		Ticker: "MU",
+		Events: []Event{
+			{
+				Date: dt("2026-06-24"), Session: "amc", Year: 2026, Quarter: 3,
+				EPSActual: f(25.11), SurprisePercent: f(17.3),
+				Reaction: &reaction.Event{
+					ReactionVsSpy: -12.2, Sigma: -3.0, VolumeX: 3.2,
+					Gap: &reaction.Gap{Direction: "down", Pattern: "full-fade"},
+				},
+			},
+		},
+	}
+	got := Build(c)
+	if !strings.Contains(got, "24 июн 2026 (AMC) · beat +17.3%") {
+		t.Fatalf("event head wrong:\n%s", got)
+	}
+	if !strings.Contains(got, "реакция -12.2% vs рынка -3.0σ · гэп вниз, полный фейд · ×3.2 объём") {
+		t.Fatalf("event detail wrong:\n%s", got)
+	}
+	if !strings.Contains(got, "⚠️ sell-the-news") {
+		t.Fatalf("expected sell-the-news flag:\n%s", got)
 	}
 }
 
-func TestBuildFallsBackToTickerWhenNoName(t *testing.T) {
-	got := Build(Card{Ticker: "XYZ", Past: []Quarter{{Year: 2025, Quarter: 1, EPSActual: f(1), EPSEstimate: f(1), SurprisePercent: f(0)}}})
+func TestBuildEventBeatAndRunNoFlag(t *testing.T) {
+	c := Card{
+		Ticker: "MU",
+		Events: []Event{
+			{
+				Date: dt("2026-06-24"), Session: "amc", SurprisePercent: f(17.3), EPSActual: f(25.11),
+				Reaction: &reaction.Event{ReactionVsSpy: 15.7, Sigma: 3.5, VolumeX: 3.2,
+					Gap: &reaction.Gap{Direction: "up", Pattern: "go"}},
+			},
+		},
+	}
+	got := Build(c)
+	if strings.Contains(got, "sell-the-news") {
+		t.Fatalf("beat-and-run should not flag sell-the-news:\n%s", got)
+	}
+	if !strings.Contains(got, "гэп вверх, удерживает") {
+		t.Fatalf("gap words wrong:\n%s", got)
+	}
+}
+
+func TestBuildFallsBackToTicker(t *testing.T) {
+	got := Build(Card{Ticker: "XYZ"})
 	if !strings.Contains(got, "XYZ — XYZ") {
-		t.Fatalf("expected ticker fallback in header, got:\n%s", got)
+		t.Fatalf("ticker fallback missing:\n%s", got)
 	}
 }

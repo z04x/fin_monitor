@@ -58,6 +58,17 @@ func (c *Client) GetEarnings(ctx context.Context, symbol string) ([]EarningHisto
 	return history, nil
 }
 
+// GetRecommendation returns analyst-consensus snapshots (stock/recommendation),
+// newest-first. Free tier returns the last ~4 months.
+func (c *Client) GetRecommendation(ctx context.Context, symbol string) ([]Recommendation, error) {
+	var recs []Recommendation
+	query := url.Values{"symbol": {symbol}}
+	if err := c.get(ctx, "/stock/recommendation", query, &recs); err != nil {
+		return nil, fmt.Errorf("get recommendation %s: %w", symbol, err)
+	}
+	return recs, nil
+}
+
 // GetMetrics returns TTM/valuation metrics (stock/metric?metric=all). Free
 // tier. Any field may be nil if Finnhub has no value for this symbol.
 func (c *Client) GetMetrics(ctx context.Context, symbol string) (Metrics, error) {

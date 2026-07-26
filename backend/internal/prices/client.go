@@ -25,6 +25,18 @@ func NewClient(baseURL, token string) *Client {
 	}
 }
 
+// GetDailyPrices returns daily OHLCV (incl. adjusted series) for a ticker
+// over [startDate, endDate] (YYYY-MM-DD), oldest-first. Works for SPY too.
+func (c *Client) GetDailyPrices(ctx context.Context, ticker, startDate, endDate string) ([]DailyPrice, error) {
+	var prices []DailyPrice
+	path := "/tiingo/daily/" + url.PathEscape(ticker) + "/prices"
+	query := url.Values{"startDate": {startDate}, "endDate": {endDate}}
+	if err := c.get(ctx, path, query, &prices); err != nil {
+		return nil, fmt.Errorf("get daily prices %s: %w", ticker, err)
+	}
+	return prices, nil
+}
+
 func (c *Client) get(ctx context.Context, path string, query url.Values, target any) error {
 	if query == nil {
 		query = url.Values{}

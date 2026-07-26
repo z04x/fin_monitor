@@ -14,3 +14,8 @@
 
 # Local database
 /postgres-data/
+/testdata/
+
+
+# TempLock
+/frontend/
